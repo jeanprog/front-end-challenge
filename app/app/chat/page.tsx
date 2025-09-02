@@ -1,7 +1,19 @@
 
-import ChatInterface from '@/components/chat/chat-interface'
+import dynamic from 'next/dynamic';
+import { ChatSkeleton } from '@/components/chat/chat-skeleton';
+
+const ChatInterface = dynamic(
+  () => import('@/components/chat/chat-interface'),
+  {
+    ssr: false,
+    loading: () => <ChatSkeleton />,
+  }
+);
+
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { MessageSquare, Bot, AlertCircle } from 'lucide-react'
+import ErrorBoundary from '@/components/error-boundary'
 
 export default function ChatPage() {
   return (
@@ -21,7 +33,9 @@ export default function ChatPage() {
 
       {/* Chat Interface */}
       <div className="max-w-4xl mx-auto">
-        <ChatInterface />
+        <ErrorBoundary>
+          <ChatInterface />
+        </ErrorBoundary>
       </div>
 
       {/* Instructions for Developers */}

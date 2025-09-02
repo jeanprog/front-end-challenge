@@ -2,6 +2,7 @@
 import UploadInterface from '@/components/upload/upload-interface'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { FileText, Upload } from 'lucide-react'
+import ErrorBoundary from '@/components/error-boundary'
 
 export default function UploadPage() {
   return (
@@ -21,7 +22,9 @@ export default function UploadPage() {
 
       {/* Upload Interface */}
       <div className="max-w-2xl mx-auto">
-        <UploadInterface />
+        <ErrorBoundary>
+          <UploadInterface />
+        </ErrorBoundary>
       </div>
 
       {/* Requirements */}

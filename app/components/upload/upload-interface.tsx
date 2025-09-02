@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Upload, FileText, CheckCircle, AlertCircle, X } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { useFileStore } from '@/store/useFileStore'
 
 interface UploadedFile {
   file_id: string
@@ -20,6 +21,7 @@ export default function UploadInterface() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+   const { files, addFile, removeFile } = useFileStore()
   const { toast } = useToast()
 
   const handleFileSelect = async (files: FileList | null) => {
@@ -49,7 +51,29 @@ export default function UploadInterface() {
     await uploadFile(file)
   }
 
-  const uploadFile = async (file: File) => {
+   const uploadFile = async (file: File) => {
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await fetch('/api/upload', { method: 'POST', body: formData })
+      if (!response.ok) throw new Error('Upload failed')
+
+      const result: UploadedFile = await response.json()
+      addFile(result)  // 🔹 armazenando no store
+
+      toast({ title: 'Upload successful', description: `${file.name} uploaded!` })
+    } catch (error) {
+      console.error(error)
+      toast({ title: 'Upload failed', description: 'Please try again', variant: 'destructive' })
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+ /*  const uploadFile = async (file: File) => {
     setUploading(true)
     
     const formData = new FormData()
@@ -86,7 +110,7 @@ export default function UploadInterface() {
         fileInputRef.current.value = ''
       }
     }
-  }
+  } */
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -106,9 +130,6 @@ export default function UploadInterface() {
     return new Date(dateString).toLocaleString()
   }
 
-  const removeFile = (fileId: string) => {
-    setUploadedFiles(prev => prev.filter(f => f.file_id !== fileId))
-  }
 
   return (
     <div className="space-y-6">

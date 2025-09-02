@@ -2,6 +2,7 @@
 import DownloadInterface from '@/components/download/download-interface'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Download, FileText, Zap } from 'lucide-react'
+import ErrorBoundary from '@/components/error-boundary'
 
 export default function DownloadPage() {
   return (
@@ -21,7 +22,9 @@ export default function DownloadPage() {
 
       {/* Download Interface */}
       <div className="max-w-4xl mx-auto">
-        <DownloadInterface />
+        <ErrorBoundary>
+          <DownloadInterface />
+        </ErrorBoundary>
       </div>
 
       {/* Processing Information */}

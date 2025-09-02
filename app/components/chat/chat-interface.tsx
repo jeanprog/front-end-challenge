@@ -1,72 +1,148 @@
+"use client";
 
-'use client'
-
-import React, { useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { MessageSquare, Bot, User, Send, AlertTriangle } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import React, { useEffect, useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { MessageSquare, Bot, User, Send, AlertTriangle, Download } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { sendMessageStream, startConversation } from "@/lib/chat";
+import { useChatStore } from "@/store/useChatStore";
+import { useFileStore } from "@/store/useFileStore";
+import { exportConversationToFile } from "@/lib/utils";
 
 interface Message {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: Date
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
 }
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [inputMessage, setInputMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
+  const {
+    messages,
+    addMessage,
+    setLoading,
+    isLoading,
+    error,
+    setError,
+    conversationId,
+    setConversationId,
+    updateLastAssistantMessage,
+  } = useChatStore();
+  const { files } = useFileStore();
+  const [inputMessage, setInputMessage] = useState("");
 
-  // TODO: Implement actual chat functionality
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return
+  // Inicializa a conversa
+  useEffect(() => {
+    async function initConversation() {
+      try {
+        const id = await startConversation();
+        setConversationId(id);
+      } catch (err) {
+        console.error(err);
+        setError("Não foi possível iniciar a conversa");
+      }
+    }
+    initConversation();
+  }, [setError, setConversationId]);
+
+  /*   const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !conversationId) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      role: 'user',
+      role: "user",
       content: inputMessage,
-      timestamp: new Date()
-    }
+      timestamp: new Date(),
+    };
+    addMessage(userMessage);
+    setInputMessage("");
+    setLoading(true);
 
-    setMessages(prev => [...prev, userMessage])
-    setInputMessage('')
-    setIsLoading(true)
+    const assistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+    };
+    addMessage(assistantMessage);
 
-    // TODO: Replace with actual API call to streaming endpoint
-    // Example implementation needed:
-    /*
-    try {
-      const response = await fetch('/api/chat/stream/conversation-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: inputMessage })
-      })
-      
-      // Handle streaming response here
-    } catch (error) {
-      // Handle errors
-    }
-    */
+    // Streaming fetch normal
+    sendMessageStream(conversationId, userMessage.content, {
+      onChunk: (chunk) => {
+        updateLastAssistantMessage(chunk);
+      },
+      onError: (err) => {
+        console.error(err);
+        setError("Erro ao enviar mensagem");
+        setLoading(false);
+      },
+      onComplete: () => setLoading(false),
+    });
+  }; */
 
-    // Placeholder response for demonstration
-    setTimeout(() => {
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'This is a placeholder response. Please implement the streaming chat functionality.',
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, botMessage])
-      setIsLoading(false)
-    }, 1000)
-  }
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !conversationId) return;
 
-  const formatTimestamp = (timestamp: Date): string => {
-    return timestamp.toLocaleTimeString()
-  }
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: inputMessage,
+      timestamp: new Date(),
+    };
+    addMessage(userMessage);
+    setInputMessage("");
+    setLoading(true);
+
+    const assistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+    };
+    addMessage(assistantMessage);
+
+    // Monta payload com contexto de arquivo
+
+    sendMessageStream({
+      conversationId,
+      message: userMessage.content,
+      file_id: files[0]?.file_id,
+      handlers: {
+        onChunk: (chunk) => updateLastAssistantMessage(chunk),
+        onError: (err) => {
+          console.error("Erro:", err);
+
+          addMessage({
+            id: Date.now().toString() + "-error",
+            role: "assistant",
+            content:
+              typeof err === "string"
+                ? err
+                : "Ocorreu um erro. Tente novamente mais tarde.",
+            timestamp: new Date(),
+          });
+
+          setLoading(false);
+        },
+        onComplete: () => setLoading(false),
+      },
+    });
+  };
+
+  const formatTimestamp = (timestamp: Date): string =>
+    timestamp.toLocaleTimeString();
+
+  const handleExport = () => {
+    exportConversationToFile(messages, conversationId);
+  };
 
   return (
     <div className="space-y-6">
@@ -74,18 +150,29 @@ export default function ChatInterface() {
       <Alert className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950">
         <AlertTriangle className="h-4 w-4 text-yellow-600" />
         <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-          <strong>TODO:</strong> This chat interface needs to be implemented. 
-          Key features to add: streaming responses, conversation management, file context integration.
+          <strong>TODO:</strong> This chat interface needs to be implemented.
+          Key features to add: streaming responses, conversation management,
+          file context integration.
         </AlertDescription>
       </Alert>
 
       {/* Chat Container */}
       <Card className="h-[600px] flex flex-col">
         <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" />
-            AI Agent Chat
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              AI Agent Chat
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleExport}
+              aria-label="Export chat"
+            >
+              <Download className="w-4 h-4" />
+            </Button>
+          </div>
           <CardDescription>
             Ask questions about your uploaded files or general topics
           </CardDescription>
@@ -108,26 +195,37 @@ export default function ChatInterface() {
               </div>
             </div>
           ) : (
-            messages.map((message) => (
-              <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {message.role === 'assistant' && (
+            messages.map((message: Message) => (
+              <div
+                key={message.id}
+                className={`flex gap-3 ${
+                  message.role === "user" ? "justify-end" : "justify-start"
+                }`}
+              >
+                {message.role === "assistant" && (
                   <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
                     <Bot className="w-4 h-4 text-primary-foreground" />
                   </div>
                 )}
-                <div className={`max-w-[80%] space-y-1 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
-                  <div className={`inline-block px-4 py-2 rounded-lg ${
-                    message.role === 'user' 
-                      ? 'bg-primary text-primary-foreground' 
-                      : 'bg-muted'
-                  }`}>
+                <div
+                  className={`max-w-[80%] space-y-1 ${
+                    message.role === "user" ? "text-right" : "text-left"
+                  }`}
+                >
+                  <div
+                    className={`inline-block px-4 py-2 rounded-lg ${
+                      message.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted"
+                    }`}
+                  >
                     {message.content}
                   </div>
                   <p className="text-xs text-muted-foreground px-1">
                     {formatTimestamp(message.timestamp)}
                   </p>
                 </div>
-                {message.role === 'user' && (
+                {message.role === "user" && (
                   <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
                     <User className="w-4 h-4" />
                   </div>
@@ -144,8 +242,14 @@ export default function ChatInterface() {
               <div className="bg-muted px-4 py-2 rounded-lg">
                 <div className="flex space-x-1">
                   <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <div
+                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
+                    style={{ animationDelay: "0.1s" }}
+                  ></div>
+                  <div
+                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
+                    style={{ animationDelay: "0.2s" }}
+                  ></div>
                 </div>
               </div>
             </div>
@@ -160,11 +264,11 @@ export default function ChatInterface() {
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Type your message..."
               className="flex-1"
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
               disabled={isLoading}
             />
-            <Button 
-              onClick={handleSendMessage} 
+            <Button
+              onClick={handleSendMessage}
               disabled={!inputMessage.trim() || isLoading}
               size="icon"
             >
@@ -185,7 +289,9 @@ export default function ChatInterface() {
           <div>
             <h4 className="font-medium mb-2">Required API Integration:</h4>
             <ul className="space-y-1 pl-4">
-              <li>• Connect to <code>/api/chat/stream/{`{conversationId}`}</code></li>
+              <li>
+                • Connect to <code>/api/chat/stream/{`{conversationId}`}</code>
+              </li>
               <li>• Handle streaming responses with Server-Sent Events</li>
               <li>• Implement conversation state management</li>
               <li>• Add file context integration</li>
@@ -203,5 +309,5 @@ export default function ChatInterface() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

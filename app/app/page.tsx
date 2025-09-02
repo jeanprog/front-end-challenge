@@ -1,8 +1,13 @@
-
-import { FileText, MessageSquare, Download, Bot } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
+import { FileText, MessageSquare, Download, Bot } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export default function HomePage() {
   return (
@@ -16,8 +21,8 @@ export default function HomePage() {
           Agent UI Challenge
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Upload text files, process them with AI agents, and download the results. 
-          Built with Next.js, FastAPI, and OpenRouter integration.
+          Upload text files, process them with AI agents, and download the
+          results. Built with Next.js, FastAPI, and OpenRouter integration.
         </p>
       </div>
 
@@ -35,9 +40,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <Link href="/upload">
-              <Button className="w-full">
-                Start Upload
-              </Button>
+              <Button className="w-full">Start Upload</Button>
             </Link>
           </CardContent>
         </Card>
@@ -86,7 +89,8 @@ export default function HomePage() {
         <CardHeader>
           <CardTitle>Technology Stack</CardTitle>
           <CardDescription>
-            This challenge demonstrates modern full-stack development with AI integration
+            This challenge demonstrates modern full-stack development with AI
+            integration
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -142,7 +146,9 @@ export default function HomePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-orange-700 dark:text-orange-300 space-y-2">
-          <p>• Complete the chat interface implementation in <code>/chat</code></p>
+          <p>
+            • Complete the chat interface implementation in <code>/chat</code>
+          </p>
           <p>• Add error handling and loading states throughout the app</p>
           <p>• Enhance the file processing pipeline with additional features</p>
           <p>• Implement conversation history and export functionality</p>
@@ -150,5 +156,5 @@ export default function HomePage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
