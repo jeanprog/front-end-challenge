@@ -10,12 +10,24 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Bot, User, Send, AlertTriangle, Download } from "lucide-react";
+import {
+  MessageSquare,
+  Bot,
+  User,
+  Send,
+  AlertTriangle,
+  Download,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { sendMessageStream, startConversation } from "@/lib/chat";
 import { useChatStore } from "@/store/useChatStore";
 import { useFileStore } from "@/store/useFileStore";
 import { exportConversationToFile } from "@/lib/utils";
+
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css";
 
 interface Message {
   id: string;
@@ -52,41 +64,6 @@ export default function ChatInterface() {
     }
     initConversation();
   }, [setError, setConversationId]);
-
-  /*   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !conversationId) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: inputMessage,
-      timestamp: new Date(),
-    };
-    addMessage(userMessage);
-    setInputMessage("");
-    setLoading(true);
-
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content: "",
-      timestamp: new Date(),
-    };
-    addMessage(assistantMessage);
-
-    // Streaming fetch normal
-    sendMessageStream(conversationId, userMessage.content, {
-      onChunk: (chunk) => {
-        updateLastAssistantMessage(chunk);
-      },
-      onError: (err) => {
-        console.error(err);
-        setError("Erro ao enviar mensagem");
-        setLoading(false);
-      },
-      onComplete: () => setLoading(false),
-    });
-  }; */
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !conversationId) return;
@@ -195,43 +172,54 @@ export default function ChatInterface() {
               </div>
             </div>
           ) : (
-            messages.map((message: Message) => (
-              <div
-                key={message.id}
-                className={`flex gap-3 ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                {message.role === "assistant" && (
-                  <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
-                    <Bot className="w-4 h-4 text-primary-foreground" />
-                  </div>
-                )}
+            messages.map((message: Message, index: number) => {
+              const isLastMessage = index === messages.length - 1;
+              const isStreaming =
+                isLastMessage && message.role === "assistant" && isLoading;
+
+              return (
                 <div
-                  className={`max-w-[80%] space-y-1 ${
-                    message.role === "user" ? "text-right" : "text-left"
+                  key={message.id}
+                  className={`flex gap-3 ${
+                    message.role === "user" ? "justify-end" : "justify-start"
                   }`}
                 >
+                  {message.role === "assistant" && (
+                    <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                      <Bot className="w-4 h-4 text-primary-foreground" />
+                    </div>
+                  )}
                   <div
-                    className={`inline-block px-4 py-2 rounded-lg ${
-                      message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
+                    className={`max-w-[80%] space-y-1 ${
+                      message.role === "user" ? "text-right" : "text-left"
                     }`}
                   >
-                    {message.content}
+                    <div
+                      className={`inline-block px-4 py-2 rounded-lg ${
+                        message.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted"
+                      } ${isStreaming ? "animate-pulse" : ""}`}
+                    >
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeHighlight]}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                    <p className="text-xs text-muted-foreground px-1">
+                      {formatTimestamp(message.timestamp)}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground px-1">
-                    {formatTimestamp(message.timestamp)}
-                  </p>
+                  {message.role === "user" && (
+                    <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
+                      <User className="w-4 h-4" />
+                    </div>
+                  )}
                 </div>
-                {message.role === "user" && (
-                  <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
-                    <User className="w-4 h-4" />
-                  </div>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
 
           {isLoading && (
