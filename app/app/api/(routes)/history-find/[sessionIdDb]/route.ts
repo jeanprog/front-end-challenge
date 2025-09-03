@@ -5,10 +5,10 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { sessionIdDb: string } }
 ) {
-  console.log("GET /api/history-find chamado");
+ 
 
   const { sessionIdDb } = params;
-  console.log("sessionIdDb recebido:", sessionIdDb);
+
 
   if (!sessionIdDb) {
     console.error("Erro: sessionIdDb ausente");
@@ -30,11 +30,6 @@ export async function GET(
     });
   }
 
-  console.log("Conversa encontrada:", {
-    id: conversation.id,
-    sessionId: conversation.sessionId,
-    totalMessages: conversation.messages.length,
-  });
 
   // Stream de mensagens
   const stream = new ReadableStream({
@@ -47,10 +42,10 @@ export async function GET(
           isHistory: true,
           sessionId: conversation.sessionId,
         };
-        console.log("Enviando mensagem no stream:", payload);
+
         controller.enqueue(JSON.stringify(payload) + "\n");
       }
-      console.log("Todas as mensagens enviadas, fechando stream");
+    
       controller.close();
     },
   });

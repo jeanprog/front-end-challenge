@@ -10,7 +10,18 @@ export async function GET() {
         id: true,
         sessionId: true,
         createdAt: true,
+        messages: {
+          orderBy: { createdAt: "asc" }, // pega a primeira mensagem
+          take: 1,
+          select: {
+            id: true,
+            role: true,
+            content: true,
+            createdAt: true,
+          },
+        },
       },
+
       orderBy: {
         createdAt: "desc",
       },

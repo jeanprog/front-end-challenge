@@ -10,24 +10,20 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  MessageSquare,
-  Bot,
-  Send,
-  AlertTriangle,
-  Download,
-} from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { sendMessageStream, startConversation } from "@/lib/chat";
+import { MessageSquare, Bot, Send, Download } from "lucide-react";
 import { useChatStore } from "@/store/useChatStore";
 import { useFileStore } from "@/store/useFileStore";
-import { exportConversationToFile } from "@/lib/utils";
-
-import { ChatMessage, Message } from "./chat-message"; // Import do componente memoizado
+import { ChatMessage, Message } from "./chat-message";
+import { startConversation, sendMessageStream } from "@/lib/chat";
 import { addHistory } from "@/app/services/post";
 import { fetchWithRetry } from "@/lib/api";
 import { ConversationHistory } from "./chat-history";
-import { fetchConversationMessagesStream } from "@/app/services/get";
+import {
+  fetchConversationMessagesStream,
+  fetchRecentConversations,
+  Conversation,
+} from "@/app/services/get";
+import { exportConversationToFile } from "@/lib/utils";
 
 export default function ChatInterface() {
   const {
@@ -39,27 +35,45 @@ export default function ChatInterface() {
     conversationId,
     setConversationId,
     updateLastAssistantMessage,
+    reset,
+    rollbackConversation,
+    commitConversation,
+    conversations,
+    setConversations,
   } = useChatStore();
 
   const { files } = useFileStore();
   const [inputMessage, setInputMessage] = useState("");
 
-  // Inicializa a conversa
-  useEffect(() => {
-    async function initConversation() {
-      try {
-        const id = await startConversation();
-        console.log(id);
-        setConversationId(id);
-        localStorage.setItem("chatSessionId", id);
-      } catch (err) {
-        console.error(err);
-        setError("Não foi possível iniciar a conversa");
-      }
-    }
-    initConversation();
-  }, [setError, setConversationId]);
+  // Inicializa nova conversa e recarrega lista
+  const initConversation = useCallback(async () => {
+    try {
+      const id = await startConversation();
+      setConversationId(id);
+      localStorage.setItem("chatSessionId", id);
 
+      // Recarrega a lista de conversas
+      const recent = await fetchRecentConversations();
+      setConversations(
+        recent.map((conv) => ({
+          ...conv,
+          createdAt: new Date(conv.createdAt), // converte string para Date
+          title: conv.messages[0]?.content.slice(0, 30) ?? "Sem título", // se quiser preencher o title
+        }))
+      );
+
+      // Limpa mensagens antigas
+    } catch (err) {
+      console.error(err);
+      setError("Não foi possível iniciar a conversa");
+    }
+  }, [setConversationId, setError, reset]);
+
+  useEffect(() => {
+    initConversation();
+  }, [initConversation]);
+
+  // Envia mensagem do usuário
   const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || !conversationId) return;
 
@@ -74,6 +88,12 @@ export default function ChatInterface() {
     setInputMessage("");
     setLoading(true);
 
+    // histórico otimista
+
+    const optimistic = useChatStore
+      .getState()
+      .addOptimisticConversation(userMessage.content);
+
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       role: "assistant",
@@ -83,7 +103,6 @@ export default function ChatInterface() {
     addMessage(assistantMessage);
 
     try {
-      // 🔹 1. Falar com o agente (sem depender do histórico)
       sendMessageStream({
         conversationId,
         message: userMessage.content,
@@ -91,30 +110,62 @@ export default function ChatInterface() {
         handlers: {
           onChunk: (chunk) => updateLastAssistantMessage(chunk),
           onError: (err) => {
-            console.error("Erro no agente:", err);
+            console.error(err);
             addMessage({
               id: Date.now().toString() + "-error",
               role: "assistant",
-              content: "Erro ao enviar a mensagem para o agente.",
+              content: "Erro ao enviar a mensagem.",
               createdAt: new Date(),
             });
+            rollbackConversation(optimistic.id);
           },
-          onComplete: () => setLoading(false),
+          onComplete: async () => {
+            setLoading(false);
+
+            const finalMessages = useChatStore.getState().messages;
+            const assistantMsg = finalMessages[finalMessages.length - 1];
+
+            if (
+              assistantMsg &&
+              assistantMsg.role === "assistant" &&
+              conversationId
+            ) {
+              try {
+                const returnedConversationId = await addHistory({
+                  sessionId: conversationId,
+                  messages: [assistantMsg],
+                  onError: console.error,
+                });
+
+                // Agora podemos setar o commit com o conversationId correto
+                if (returnedConversationId) {
+                  commitConversation(optimistic.id, returnedConversationId);
+                  setConversationId(returnedConversationId); // opcional, mantém o estado atualizado
+                }
+              } catch (err) {
+                console.error(err);
+                rollbackConversation(optimistic.id);
+              }
+            }
+          },
         },
       });
 
-      // 🔹 2. Salvar histórico de forma independente com retry
       fetchWithRetry(() =>
         addHistory({
           sessionId: conversationId,
           messages: [userMessage],
           onError: (err) => {
-            console.error("Erro ao salvar histórico:", err);
+            console.error(err);
+
+            rollbackConversation(optimistic.id);
           },
         })
       );
     } catch (err) {
-      console.error("Erro geral:", err);
+      console.error(err);
+
+      rollbackConversation(optimistic.id);
     } finally {
       setLoading(false);
     }
@@ -128,63 +179,44 @@ export default function ChatInterface() {
   ]);
 
   const formatCreatedAt = useCallback(
-    (createdAt: Date) => createdAt.toLocaleTimeString(),
+    (date: Date) => date.toLocaleTimeString(),
     []
   );
+  const handleExport = () => exportConversationToFile(messages, conversationId);
 
-  const handleExport = () => {
-    exportConversationToFile(messages, conversationId);
-  };
-
+  // Restaura conversa antiga
   const restoreConversation = useCallback(
-    (conversationId: string) => {
+    async (sessionId: string) => {
+      reset(); // limpa mensagens atuais
       setLoading(true);
-      fetchConversationMessagesStream(
-        conversationId,
-        ({ message, isHistory, sessionId }) => {
-          if (isHistory) addMessage(message);
-          if (sessionId) setConversationId(sessionId)
-        }
-      ).finally(() => setLoading(false));
+      try {
+        await fetchConversationMessagesStream(
+          sessionId,
+          ({ message, isHistory, sessionId }) => {
+            if (isHistory) addMessage(message);
+            if (sessionId) setConversationId(sessionId);
+          }
+        );
+      } finally {
+        setLoading(false);
+      }
     },
-    [addMessage, setLoading]
+    [addMessage, reset, setConversationId, setLoading]
   );
 
   return (
     <div className="space-y-6">
-      {/* Implementation Notice */}
-      <Alert className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950">
-        <AlertTriangle className="h-4 w-4 text-yellow-600" />
-        <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-          <strong>TODO:</strong> This chat interface needs to be implemented.
-          Key features to add: streaming responses, conversation management,
-          file context integration.
-        </AlertDescription>
-      </Alert>
-
-      {/* Chat Container */}
       <Card className="h-[600px] flex flex-col">
         <CardHeader className="border-b">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="w-5 h-5" />
-              AI Agent Chat
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleExport}
-              aria-label="Export chat"
-            >
-              <Download className="w-4 h-4" />
-            </Button>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="w-5 h-5" />
+            AI Agent Chat
+          </CardTitle>
           <CardDescription>
             Ask questions about your uploaded files or general topics
           </CardDescription>
         </CardHeader>
 
-        {/* Messages Area */}
         <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-center">
@@ -195,111 +227,53 @@ export default function ChatInterface() {
                 <div>
                   <h3 className="font-medium">Start a conversation</h3>
                   <p className="text-sm text-muted-foreground">
-                    Send a message to begin chatting with the AI agent
+                    Send a message to begin chatting
                   </p>
                 </div>
               </div>
             </div>
           ) : (
-            messages.map((message: Message, index: number) => {
+            messages.map((msg: Message, index: number) => {
               const isLastMessage =
                 index === messages.length - 1 &&
-                message.role === "assistant" &&
+                msg.role === "assistant" &&
                 isLoading;
-
               return (
                 <ChatMessage
-                  key={message.id}
-                  message={message}
+                  key={msg.id}
+                  message={msg}
                   isStreaming={isLastMessage}
                   formatTimestamp={formatCreatedAt}
                 />
               );
             })
           )}
-
-          {isLoading && messages.length === 0 && (
-            <div className="flex gap-3 justify-start">
-              <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
-                <Bot className="w-4 h-4 text-primary-foreground" />
-              </div>
-              <div className="bg-muted px-4 py-2 rounded-lg">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                  <div
-                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                    style={{ animationDelay: "0.1s" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"
-                    style={{ animationDelay: "0.2s" }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
 
-        {/* Input Area */}
-        <div className="border-t p-4">
-          <div className="flex gap-2">
-            <Input
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder="Type your message..."
-              className="flex-1"
-              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-              disabled={isLoading}
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || isLoading}
-              size="icon"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
-          </div>
+        <div className="border-t p-4 flex gap-2">
+          <Input
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            placeholder="Type your message..."
+            className="flex-1"
+            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            disabled={isLoading}
+          />
+          <Button
+            onClick={handleSendMessage}
+            disabled={!inputMessage.trim() || isLoading}
+            size="icon"
+          >
+            <Send className="w-4 h-4" />
+          </Button>
         </div>
       </Card>
-      <ConversationHistory
-        onSelect={(sessionId) => {
-          console.log("Selecionou sessionId:", sessionId);
-          restoreConversation(sessionId);
-          /*    setConversationId(sessionId);  */ // a
-          // Aqui você pode setar no estado ou localStorage para carregar a conversa
-        }}
-      />
 
-      {/* Development Instructions */}
-      <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
-        <CardHeader>
-          <CardTitle className="text-blue-800 dark:text-blue-200 text-lg">
-            🛠️ Implementation Guide
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-blue-700 dark:text-blue-300 space-y-3 text-sm">
-          <div>
-            <h4 className="font-medium mb-2">Required API Integration:</h4>
-            <ul className="space-y-1 pl-4">
-              <li>
-                • Connect to <code>/api/chat/stream/{`{conversationId}`}</code>
-              </li>
-              <li>• Handle streaming responses with Server-Sent Events</li>
-              <li>• Implement conversation state management</li>
-              <li>• Add file context integration</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-medium mb-2">UI Enhancements:</h4>
-            <ul className="space-y-1 pl-4">
-              <li>• Add typing indicators and loading states</li>
-              <li>• Implement message formatting and code highlighting</li>
-              <li>• Add conversation history and export features</li>
-              <li>• Include error handling and retry mechanisms</li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Lista de conversas */}
+      <ConversationHistory
+        conversations={conversations}
+        onSelect={restoreConversation}
+      />
     </div>
   );
 }

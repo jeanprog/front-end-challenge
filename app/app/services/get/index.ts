@@ -2,9 +2,11 @@ import { Message } from "@/store/useChatStore";
 
 // /app/services/conversations.ts
 export interface Conversation {
-  id: string
+  id: string;
   sessionId: string;
   createdAt: string;
+  title: string;
+  messages: Message[];
 }
 
 export interface StreamedMessage {
