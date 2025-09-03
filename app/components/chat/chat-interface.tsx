@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import {
   MessageSquare,
   Bot,
-  User,
   Send,
   AlertTriangle,
   Download,
@@ -24,17 +23,11 @@ import { useChatStore } from "@/store/useChatStore";
 import { useFileStore } from "@/store/useFileStore";
 import { exportConversationToFile } from "@/lib/utils";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import "highlight.js/styles/github-dark.css";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
+import { ChatMessage, Message } from "./chat-message"; // Import do componente memoizado
+import { addHistory } from "@/app/services/post";
+import { fetchWithRetry } from "@/lib/api";
+import { ConversationHistory } from "./chat-history";
+import { fetchConversationMessagesStream } from "@/app/services/get";
 
 export default function ChatInterface() {
   const {
@@ -42,12 +35,12 @@ export default function ChatInterface() {
     addMessage,
     setLoading,
     isLoading,
-    error,
     setError,
     conversationId,
     setConversationId,
     updateLastAssistantMessage,
   } = useChatStore();
+
   const { files } = useFileStore();
   const [inputMessage, setInputMessage] = useState("");
 
@@ -56,7 +49,9 @@ export default function ChatInterface() {
     async function initConversation() {
       try {
         const id = await startConversation();
+        console.log(id);
         setConversationId(id);
+        localStorage.setItem("chatSessionId", id);
       } catch (err) {
         console.error(err);
         setError("Não foi possível iniciar a conversa");
@@ -65,15 +60,16 @@ export default function ChatInterface() {
     initConversation();
   }, [setError, setConversationId]);
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = useCallback(async () => {
     if (!inputMessage.trim() || !conversationId) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
       content: inputMessage,
-      timestamp: new Date(),
+      createdAt: new Date(),
     };
+
     addMessage(userMessage);
     setInputMessage("");
     setLoading(true);
@@ -82,44 +78,77 @@ export default function ChatInterface() {
       id: (Date.now() + 1).toString(),
       role: "assistant",
       content: "",
-      timestamp: new Date(),
+      createdAt: new Date(),
     };
     addMessage(assistantMessage);
 
-    // Monta payload com contexto de arquivo
-
-    sendMessageStream({
-      conversationId,
-      message: userMessage.content,
-      file_id: files[0]?.file_id,
-      handlers: {
-        onChunk: (chunk) => updateLastAssistantMessage(chunk),
-        onError: (err) => {
-          console.error("Erro:", err);
-
-          addMessage({
-            id: Date.now().toString() + "-error",
-            role: "assistant",
-            content:
-              typeof err === "string"
-                ? err
-                : "Ocorreu um erro. Tente novamente mais tarde.",
-            timestamp: new Date(),
-          });
-
-          setLoading(false);
+    try {
+      // 🔹 1. Falar com o agente (sem depender do histórico)
+      sendMessageStream({
+        conversationId,
+        message: userMessage.content,
+        file_id: files[0]?.file_id,
+        handlers: {
+          onChunk: (chunk) => updateLastAssistantMessage(chunk),
+          onError: (err) => {
+            console.error("Erro no agente:", err);
+            addMessage({
+              id: Date.now().toString() + "-error",
+              role: "assistant",
+              content: "Erro ao enviar a mensagem para o agente.",
+              createdAt: new Date(),
+            });
+          },
+          onComplete: () => setLoading(false),
         },
-        onComplete: () => setLoading(false),
-      },
-    });
-  };
+      });
 
-  const formatTimestamp = (timestamp: Date): string =>
-    timestamp.toLocaleTimeString();
+      // 🔹 2. Salvar histórico de forma independente com retry
+      fetchWithRetry(() =>
+        addHistory({
+          sessionId: conversationId,
+          messages: [userMessage],
+          onError: (err) => {
+            console.error("Erro ao salvar histórico:", err);
+          },
+        })
+      );
+    } catch (err) {
+      console.error("Erro geral:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    inputMessage,
+    conversationId,
+    addMessage,
+    setLoading,
+    updateLastAssistantMessage,
+    files,
+  ]);
+
+  const formatCreatedAt = useCallback(
+    (createdAt: Date) => createdAt.toLocaleTimeString(),
+    []
+  );
 
   const handleExport = () => {
     exportConversationToFile(messages, conversationId);
   };
+
+  const restoreConversation = useCallback(
+    (conversationId: string) => {
+      setLoading(true);
+      fetchConversationMessagesStream(
+        conversationId,
+        ({ message, isHistory, sessionId }) => {
+          if (isHistory) addMessage(message);
+          if (sessionId) setConversationId(sessionId)
+        }
+      ).finally(() => setLoading(false));
+    },
+    [addMessage, setLoading]
+  );
 
   return (
     <div className="space-y-6">
@@ -173,56 +202,23 @@ export default function ChatInterface() {
             </div>
           ) : (
             messages.map((message: Message, index: number) => {
-              const isLastMessage = index === messages.length - 1;
-              const isStreaming =
-                isLastMessage && message.role === "assistant" && isLoading;
+              const isLastMessage =
+                index === messages.length - 1 &&
+                message.role === "assistant" &&
+                isLoading;
 
               return (
-                <div
+                <ChatMessage
                   key={message.id}
-                  className={`flex gap-3 ${
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  {message.role === "assistant" && (
-                    <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
-                      <Bot className="w-4 h-4 text-primary-foreground" />
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[80%] space-y-1 ${
-                      message.role === "user" ? "text-right" : "text-left"
-                    }`}
-                  >
-                    <div
-                      className={`inline-block px-4 py-2 rounded-lg ${
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted"
-                      } ${isStreaming ? "animate-pulse" : ""}`}
-                    >
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeHighlight]}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    </div>
-                    <p className="text-xs text-muted-foreground px-1">
-                      {formatTimestamp(message.timestamp)}
-                    </p>
-                  </div>
-                  {message.role === "user" && (
-                    <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
-                      <User className="w-4 h-4" />
-                    </div>
-                  )}
-                </div>
+                  message={message}
+                  isStreaming={isLastMessage}
+                  formatTimestamp={formatCreatedAt}
+                />
               );
             })
           )}
 
-          {isLoading && (
+          {isLoading && messages.length === 0 && (
             <div className="flex gap-3 justify-start">
               <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
                 <Bot className="w-4 h-4 text-primary-foreground" />
@@ -265,6 +261,14 @@ export default function ChatInterface() {
           </div>
         </div>
       </Card>
+      <ConversationHistory
+        onSelect={(sessionId) => {
+          console.log("Selecionou sessionId:", sessionId);
+          restoreConversation(sessionId);
+          /*    setConversationId(sessionId);  */ // a
+          // Aqui você pode setar no estado ou localStorage para carregar a conversa
+        }}
+      />
 
       {/* Development Instructions */}
       <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">

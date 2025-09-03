@@ -1,7 +1,5 @@
 generator client {
     provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
-    output = "/home/ubuntu/agent_ui_challenge/app/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -10,17 +8,18 @@ datasource db {
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  messages  Message[]
+  id         String    @id @default(cuid())
+  sessionId  String    @unique
+  createdAt  DateTime  @default(now())
+  messages   Message[]
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  role      String
-  content   String   @db.Text
-  createdAt DateTime @default(now())
-
+  id             String       @id @default(cuid())
+  role           String
+  content        String       @db.Text
+  createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   conversationId String
 }
+
